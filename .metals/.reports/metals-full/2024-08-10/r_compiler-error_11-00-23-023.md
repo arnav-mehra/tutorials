@@ -1,29 +1,43 @@
+file:///C:/Users/Arnav/Documents/GitHub/my-tutorials/src/test/scala/lms/tutorial/idk.scala
+### dotty.tools.dotc.core.TypeError$$anon$1: Toplevel definition EffectFunction is defined in
+  C:/Users/Arnav/Documents/GitHub/my-tutorials/src/test/scala/lms/tutorial/idk.scala
+and also in
+  C:/Users/Arnav/Documents/GitHub/my-tutorials/src/test/scala/lms/tutorial/idk.scala
+One of these files should be removed from the classpath.
+
+occurred in the presentation compiler.
+
+presentation compiler configuration:
+Scala version: 3.3.3
+Classpath:
+<HOME>\AppData\Local\Coursier\cache\v1\https\repo1.maven.org\maven2\org\scala-lang\scala3-library_3\3.3.3\scala3-library_3-3.3.3.jar [exists ], <HOME>\AppData\Local\Coursier\cache\v1\https\repo1.maven.org\maven2\org\scala-lang\scala-library\2.13.12\scala-library-2.13.12.jar [exists ]
+Options:
+
+
+
+action parameters:
+offset: 1896
+uri: file:///C:/Users/Arnav/Documents/GitHub/my-tutorials/src/test/scala/lms/tutorial/idk.scala
+text:
+```scala
 package scala.lms.tutorial.idk
 
 import scala.collection.mutable.HashMap
 import scala.collection.mutable.HashSet
 import scala.collection.mutable.ArrayBuffer
 
-object Data {
-    trait Data
-    case class Number(value: Double = 0) extends Data
-    case class Str   (value: String = "") extends Data
-    case class Array (value: ArrayBuffer[Data] = ArrayBuffer()) extends Data
-    case class Object(value: HashMap[Data, Data] = HashMap()) extends Data
-    case class Bool  (value: Boolean = false) extends Data
-    case class Func  (value: Function[Data.Array, Data] = (_ => Data.Undef())) extends Data
-    case class Null  () extends Data
-    case class Undef () extends Data
+class SString extends String
 
+object Data {
     def createElement(
-        tag: Data.Str,
+        tag: Data.String,
         attrs: Data.Object,
         children: Data.Array
     ): Data.Object = {
         val m: HashMap[Data, Data] = HashMap(
-            Data.Str("tag") -> tag,
-            Data.Str("children") -> children,
-            Data.Str("replaceChildren") -> Data.Func((children: Data.Array) => {
+            Data.String("tag") -> tag,
+            Data.String("children") -> children,
+            Data.String("replaceChildren") -> Data.Func((children: Data.Array) => {
                 children.value.clear()
                 children.value.appendAll(children.value)
                 Data.Undef()
@@ -32,13 +46,24 @@ object Data {
         Data.Object(m)
     }
 
-    def createText(value: Data.Str): Data.Object = {
-        val m: HashMap[Data, Data] = HashMap(Data.Str("textContent") -> value)
+    def createText(value: Data.String): Data.Object = {
+        val m: HashMap[Data, Data] = HashMap(Data.String("textContent") -> value)
         Data.Object(m)
     }
 }
 
-abstract class Valued(var value: Data = Data.Undef()) {}
+class Data {
+    class Number(val value: Double = 0) extends Data
+    class String(val value: SString = "") extends Data
+    class Array (val value: ArrayBuffer[Data] = ArrayBuffer()) extends Data
+    class Object(val value: HashMap[Data, Data] = HashMap()) extends Data
+    class Bool  (val value: Boolean = false) extends Data
+    class Func  (val value: Function[Data.Array, Data] = (_ => Data.Undef)) extends Data
+    class Null  () extends Data
+    class Undef () extends Data
+}
+
+abstract class Valued(var value: Data = Data.Undef) {}
 
 abstract class Effectful(val effects: HashSet[Effect] = HashSet()) {
     def addEffect = effects.add
@@ -54,7 +79,7 @@ extends Effectful(effects)
 with Valued(callback(parents.map(_.value))) {
     parents.foreach(_.addEffect(this))
 
-    type EffectFunction = Function[ArrayBuffer[Data], Data]
+    t@@ EffectFunction extends Function[ArrayBuffer[Data], Data]
 
     def run() = {
         val args = parents.map(_.value)
@@ -108,7 +133,7 @@ abstract class Component(
 
     def _mount() = {
         val root = render()
-        val fn = wrapper.value(Data.Str("replaceChildren")).asInstanceOf[Data.Func]
+        val fn = wrapper.value(Data.String("replaceChildren")).asInstanceOf[Data.Func]
         fn.value(ArrayBuffer(root))
 
         mount()
@@ -120,7 +145,7 @@ abstract class Component(
     def _unmount() = {
         children.foreach(_._unmount())
         unmount()
-        val fn = wrapper.value(Data.Str("replaceChildren")).asInstanceOf[Data.Func]
+        val fn = wrapper.value(Data.String("replaceChildren")).asInstanceOf[Data.Func]
         fn.value(ArrayBuffer())
     }
 
@@ -137,17 +162,17 @@ abstract class Component(
         wrapper
     }
 
-    def text(value: String | Effect | State) = {
-        val node = Data.createText(Data.Str(""))
+    def text(value: SString | Effect | State) = {
+        val node = Data.createText(Data.String(""))
         value match {
-            case str: Data.Str => {
-                node.value(Data.Str("textContent")) = Data.Str(str)
+            case str: Data.String => {
+                node.value(Data.String("textContent")) = Data.String(str)
             }
             case ef: Effect | State => {
                 createEffect(
                     (params) => {
-                        val new_str = params(0).asInstanceOf[Data.Str]
-                        node.value(Data.Str("textContent")) = new_str
+                        val new_str = params(0).asInstanceOf[Data.String]
+                        node.value(Data.String("textContent")) = new_str
                         new_str
                     },
                     ArrayBuffer(ef)
@@ -158,17 +183,17 @@ abstract class Component(
     }
 
     def element(
-        tag: String,
-        attrs: HashMap[String, Data | Effect | State] | Effect | State = HashMap(),
+        tag: SString,
+        attrs: HashMap[SString, Data | Effect | State] | Effect | State = HashMap(),
         children: ArrayBuffer[Data] = ArrayBuffer()
     ) = {
         val node: Data.Object = Data.createElement(
-            Data.Str(tag),
+            Data.String(tag),
             Data.Object(HashMap()),
             Data.Array(children)
         )
         attrs match {
-            case map: HashMap[Data.Str, Data | Effect | State] => {
+            case map: HashMap[Data.String, Data | Effect | State] => {
                 map.foreachEntry((key, value) => {
                     value match {
                         case dt: Data => {
@@ -177,7 +202,7 @@ abstract class Component(
                         case ef: Effect | State => {
                             createEffect(
                                 (params) => {
-                                    val new_dt = params(0).asInstanceOf[Data.Str]
+                                    val new_dt = params(0).asInstanceOf[Data.String]
                                     node.value(key) = new_dt
                                     new_dt
                                 },
@@ -205,7 +230,7 @@ abstract class Component(
 }
 
 class ExampleParent(
-    val wrapper: Data.Object,
+    val wrapper: Element,
     val props: HashMap[Data, Data] = HashMap()
 ) extends Component(wrapper, props) {
     def render() = {
@@ -216,7 +241,7 @@ class ExampleParent(
 }
 
 class ExampleChild(
-    val wrapper: Data.Object,
+    val wrapper: Element,
     props: HashMap[Data, Data] = HashMap()
 ) extends Component(wrapper, props) {
     def render() = {
@@ -231,3 +256,19 @@ class TestIdk extends TutorialFunSuite {
         })
   }
 }
+```
+
+
+
+#### Error stacktrace:
+
+```
+
+```
+#### Short summary: 
+
+dotty.tools.dotc.core.TypeError$$anon$1: Toplevel definition EffectFunction is defined in
+  C:/Users/Arnav/Documents/GitHub/my-tutorials/src/test/scala/lms/tutorial/idk.scala
+and also in
+  C:/Users/Arnav/Documents/GitHub/my-tutorials/src/test/scala/lms/tutorial/idk.scala
+One of these files should be removed from the classpath.
