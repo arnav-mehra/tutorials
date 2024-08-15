@@ -4,8 +4,9 @@ import scala.collection.mutable.HashMap
 import scala.collection.mutable.HashSet
 import scala.collection.mutable.ArrayBuffer
 
+class Data
+
 object Data {
-    trait Data
     case class Number(value: Double = 0) extends Data
     case class Str   (value: String = "") extends Data
     case class Array (value: ArrayBuffer[Data] = ArrayBuffer()) extends Data
@@ -38,25 +39,34 @@ object Data {
     }
 }
 
-abstract class Valued(var value: Data = Data.Undef()) {}
+trait Valued {
+    var value: Data = Data.Undef()
+}
 
-abstract class Effectful(val effects: HashSet[Effect] = HashSet()) {
-    def addEffect = effects.add
-    def remEffect = effects.remove
+trait Effectful {
+    val effects: HashSet[Effect] = HashSet()
+    def addEffect = effects.add(_)
+    def remEffect = effects.remove(_)
+}
+
+abstract class VE extends Effectful with Valued 
+
+object Effect {
+    type Callback = Function[ArrayBuffer[Data], Data]
 }
 
 class Effect(
-    val callback: EffectFunction,
-    val parents: ArrayBuffer[State | Effect],
-    val effects: HashSet[Effect] = HashSet()
+    callback: Effect.Callback,
+    parents: ArrayBuffer[VE]
 )
-extends Effectful(effects)
-with Valued(callback(parents.map(_.value))) {
+extends VE {
     parents.foreach(_.addEffect(this))
+    value = {
+        val args = parents.map(_.value)
+        callback(args)
+    }
 
-    type EffectFunction = Function[ArrayBuffer[Data], Data]
-
-    def run() = {
+    def run(): Unit = {
         val args = parents.map(_.value)
         value = callback(args)
         effects.foreach(_.run())
@@ -67,13 +77,14 @@ with Valued(callback(parents.map(_.value))) {
     }
 }
 
-class State(value: Data)
-extends Effectful()
-with Valued(value) {
-    def set(x: Data | Function[Data, Data]) = {
+class State(val v: Data)
+extends VE() {
+    value = v
+
+    def set(x: Either[Data, Function[Data, Data]]) = {
         value = x match {
-            case new_value: Data => new_value
-            case transform: Function[Data, Data] => transform(value)
+            case Left(new_value) => new_value
+            case Right(transform) => transform(value)
         }
         effects.foreach(_.run())
     }
@@ -86,64 +97,57 @@ abstract class Component(
     val effects: ArrayBuffer[Effect] = ArrayBuffer(),
     val children: ArrayBuffer[Component] = ArrayBuffer()
 ) {
-    def cleanup() = {
-        children.foreach(_.cleanup())
-        effects.foreach(_.cleanup())
-    }
-
     def createState(value: Data) = {
-        val st = State(value)
+        val st = new State(value)
         states.append(st)
         st
     }
 
     def createEffect(
-        callback: EffectFunction,
-        parents: ArrayBuffer[State | Effect]
+        callback: Effect.Callback,
+        parents: ArrayBuffer[VE]
     ) = {
-        val ef = Effect(callback, parents)
+        val ef = new Effect(callback, parents)
         effects.append(ef)
         ef
     }
 
-    def _mount() = {
+    def mount(): Unit = {
         val root = render()
         val fn = wrapper.value(Data.Str("replaceChildren")).asInstanceOf[Data.Func]
-        fn.value(ArrayBuffer(root))
+        fn.value(Data.Array(ArrayBuffer(root)))
 
-        mount()
-        children.foreach(_._mount())
+        onMount()
+        children.foreach(_.mount())
     }
 
-    def mount() = {}
+    def onMount() = {}
 
-    def _unmount() = {
-        children.foreach(_._unmount())
-        unmount()
+    def cleanup(): Unit = {
+        children.foreach(_.cleanup())
+        effects.foreach(_.cleanup())
+        onCleanup()
+
         val fn = wrapper.value(Data.Str("replaceChildren")).asInstanceOf[Data.Func]
-        fn.value(ArrayBuffer())
+        fn.value(Data.Array())
     }
 
-    def unmount() = {}
+    def onCleanup() = {}
 
     def render(): Data.Object
 
-    def component[NewComponent <: Component](
-        wrapper: Data.Object,
-        props: HashMap[Data, Data] = HashMap()
-    ) = {
-        val comp = NewComponent(wrapper, props)
+    def component[NewComponent <: Component](comp: NewComponent) = {
         children.append(comp)
         wrapper
     }
 
-    def text(value: String | Effect | State) = {
+    def text(value: Either[String, VE]) = {
         val node = Data.createText(Data.Str(""))
         value match {
-            case str: Data.Str => {
+            case Left(str) => {
                 node.value(Data.Str("textContent")) = Data.Str(str)
             }
-            case ef: Effect | State => {
+            case Right(ef) => {
                 createEffect(
                     (params) => {
                         val new_str = params(0).asInstanceOf[Data.Str]
@@ -159,7 +163,7 @@ abstract class Component(
 
     def element(
         tag: String,
-        attrs: HashMap[String, Data | Effect | State] | Effect | State = HashMap(),
+        attrs: Either[HashMap[String, Either[Data, VE]], VE] = Left(HashMap()),
         children: ArrayBuffer[Data] = ArrayBuffer()
     ) = {
         val node: Data.Object = Data.createElement(
@@ -168,13 +172,15 @@ abstract class Component(
             Data.Array(children)
         )
         attrs match {
-            case map: HashMap[Data.Str, Data | Effect | State] => {
-                map.foreachEntry((key, value) => {
+            case Left(map) => {
+                map.foreach(p => {
+                    val key = Data.Str(p._1)
+                    val value = p._2
                     value match {
-                        case dt: Data => {
+                        case Left(dt) => {
                             node.value(key) = dt
                         }
-                        case ef: Effect | State => {
+                        case Right(ef) => {
                             createEffect(
                                 (params) => {
                                     val new_dt = params(0).asInstanceOf[Data.Str]
@@ -187,13 +193,13 @@ abstract class Component(
                     }
                 })
             }
-            case ef: Effect | State => {
+            case Right(ef) => {
                 createEffect(
                     (params) => {
                         val prev_val = ef.value.asInstanceOf[Data.Object]
                         val new_val = params(0).asInstanceOf[Data.Object]
                         prev_val.value.keys.foreach(node.value.remove(_))
-                        new_val.value.foreach(node.value.addOne(_))
+                        new_val.value.foreach(p => node.value(p._1) = p._2)
                         new_val
                     },
                     ArrayBuffer(ef)
@@ -205,29 +211,43 @@ abstract class Component(
 }
 
 class ExampleParent(
-    val wrapper: Data.Object,
-    val props: HashMap[Data, Data] = HashMap()
+    wrapper: Data.Object,
+    props: HashMap[Data, Data] = HashMap()
 ) extends Component(wrapper, props) {
     def render() = {
-        element("div", HashMap(), ArrayBuffer(
-            component[ExampleChild](element("div"))
+        element("div", Left(HashMap()), ArrayBuffer(
+            component(new ExampleChild(element("div")))
         ))
     }
 }
 
 class ExampleChild(
-    val wrapper: Data.Object,
+    wrapper: Data.Object,
     props: HashMap[Data, Data] = HashMap()
 ) extends Component(wrapper, props) {
     def render() = {
-        text("child")
+        text(Left("child"))
     }
 }
 
-class TestIdk extends TutorialFunSuite {
-    test("1") {
-        checkOut("1", "txt", {
-            print("Hello")
-        })
-  }
+object Main {
+    def main(args: Array[String]) = {
+        val root = Data.createElement(
+            new Data.Str("div"),
+            new Data.Object(),
+            new Data.Array()
+        )
+        val c = new ExampleParent(root)
+        print(c.render())
+    }
 }
+
+// import scala.lms.common._
+
+// class TestIdk extends TutorialFunSuite {
+//     test("1") {
+//         checkOut("1", "txt", {
+//             print("Hello")
+//         })
+//     }
+// }
